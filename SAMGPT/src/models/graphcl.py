@@ -25,18 +25,18 @@ class GraphCL(nn.Module):
         #h_00 = h_0 * self.prompt
         if aug_type == 'edge':
 
-            h_1 = gcn(seq1, aug_adj1, sparse, prompt_layers)
-            h_3 = gcn(seq1, aug_adj2, sparse, prompt_layers)
+            h_1 = gcn(seq1, aug_adj1, sparse, prompt_layers=prompt_layers)
+            h_3 = gcn(seq1, aug_adj2, sparse, prompt_layers=prompt_layers)
 
         elif aug_type == 'mask':
 
-            h_1 = gcn(seq3, adj, sparse, prompt_layers)
-            h_3 = gcn(seq4, adj, sparse, prompt_layers)
+            h_1 = gcn(seq3, adj, sparse, prompt_layers=prompt_layers)
+            h_3 = gcn(seq4, adj, sparse, prompt_layers=prompt_layers)
 
         elif aug_type == 'node' or aug_type == 'subgraph':
 
-            h_1 = gcn(seq3, aug_adj1, sparse, prompt_layers)
-            h_3 = gcn(seq4, aug_adj2, sparse, prompt_layers)
+            h_1 = gcn(seq3, aug_adj1, sparse, prompt_layers=prompt_layers)
+            h_3 = gcn(seq4, aug_adj2, sparse, prompt_layers=prompt_layers)
 
         else:
             assert False
@@ -52,7 +52,7 @@ class GraphCL(nn.Module):
         c_3 = self.read(h_3, msk)
         c_3 = self.sigm(c_3)
 
-        h_2 = gcn(seq2, adj, sparse, prompt_layers)
+        h_2 = gcn(seq2, adj, sparse, prompt_layers=prompt_layers)
 
         #h_22 = h_2 * self.prompt
 

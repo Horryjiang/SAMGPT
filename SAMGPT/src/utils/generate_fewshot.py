@@ -1,90 +1,88 @@
-import os
-import torch
+"""Generate reproducible support sets; keep the final test nodes out of support.
+
+Run directly with ``python src/utils/generate_fewshot.py --help`` or, from src,
+with ``python -m utils.generate_fewshot --help``.
+"""
+import argparse
+from pathlib import Path
 import random
-from torch_geometric.datasets import Twitch,Flickr,FacebookPagePage,Coauthor
-from dataset import *
-from process import *
-import scipy.sparse as sp
-import numpy as np
+import sys
 
-def save_sample(data, path):
-    os.makedirs(path, exist_ok=True)
-    torch.save(data['idx'], os.path.join(path, 'idx.pt'))
-    torch.save(data['labels'], os.path.join(path, 'labels.pt'))
-    if 'batch' in data:
-        torch.save(data['batch'], os.path.join(path, 'batch.pt'))
+if __package__ in (None, ''):
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-def generate_fewshot_samples(labels, num_shots, num_samples):
-    fewshot_samples = []
-    unique_labels = torch.unique(labels)
-    for _ in range(num_samples):
-        samples = []
-        for label in unique_labels:
-            label_indices = (labels == label).nonzero(as_tuple=True)[0]
-            if len(label_indices) < num_shots:
-                continue 
-            selected_indices = random.sample(label_indices.tolist(), num_shots)
-            samples.extend(selected_indices)
-        fewshot_samples.append({
-            'idx': torch.tensor(samples),
-            'labels': labels[samples]
-        })
-    return fewshot_samples
+from runtime import DATA_DIR, fewshot_dir, resolve_path
 
-def create_folders(base_path, dataset_name, num_shots=10, num_samples=100):
-    for shot in range(1, num_shots + 1):
-        for i in range(1, num_samples + 1):
-            os.makedirs(os.path.join(base_path, f'{shot}-shot_{dataset_name.lower()}', str(i)), exist_ok=True)
 
-def save_fewshot_data(dataset_name, num_shots=10, num_samples=100, path = './data'):
-    print(f'Generating node_data for {dataset_name}')
-    dataset = load_dataset(dataset_name, path)
-    data = dataset[0]
-    labels = data.y
-
-    base_path = os.path.join(path, f'fewshot_{dataset_name.lower()}')
-    create_folders(base_path, dataset_name, num_shots, num_samples)
-
-    for shot in range(1, num_shots + 1):
-        samples = generate_fewshot_samples(labels, shot, num_samples)
-        for i, sample in enumerate(samples):
-            sample_path = os.path.join(base_path, f'{shot}-shot_{dataset_name.lower()}', str(i))
-            save_sample(sample, sample_path)
-
-def generate_fewshot_samples_graph(dataset_name, shotnum, num_samples, path='./data'):
-    data = load_dataset(dataset_name, path)[0]
-    features, adj = process_tu(data,data['x'].shape[1])
+def generate_fewshot_samples(labels, num_shots, num_samples, test_count=100, seed=39):
+    import torch
+    if labels.ndim != 1 or not 0 < test_count < len(labels):
+        raise ValueError('Expected 1-D node labels and 0 < test_count < number of nodes.')
+    if num_shots < 1 or num_samples < 1:
+        raise ValueError('shots and episodes must be positive.')
+    classes = torch.unique(labels)
+    if not torch.equal(classes, torch.arange(len(classes))):
+        raise ValueError('Expected contiguous class labels 0, ..., C-1.')
+    pools = [(labels[:-test_count] == label).nonzero(as_tuple=True)[0].tolist() for label in classes]
+    if any(len(pool) < num_shots for pool in pools):
+        raise ValueError('A class has too few non-test nodes for the requested shots.')
+    rng = random.Random(seed)
     samples = []
-    for i in range(num_samples):
-        idx_train = torch.load(f"{path}/fewshot_{dataset_name.lower()}/{shotnum}-shot_{dataset_name.lower()}/{i}/idx.pt").type(torch.long)
-        lbl_train = torch.load(f"{path}/fewshot_{dataset_name.lower()}/{shotnum}-shot_{dataset_name.lower()}/{i}/labels.pt").type(torch.long)
-        subgraph = build_subgraph(adj, idx_train)
-        samples.append(
-            {
-            'idx' : subgraph['idx'],
-            'batch' : subgraph['batch'],
-            'labels' : lbl_train,
-            }
-        )
+    for _ in range(num_samples):
+        idx = torch.tensor([i for pool in pools for i in rng.sample(pool, num_shots)])
+        samples.append({'idx': idx, 'labels': labels[idx], 'centers': idx,
+                        'test_idx': torch.arange(len(labels) - test_count, len(labels))})
     return samples
 
 
-def save_fewshot_graph_data(dataset_name, num_shots=10, num_samples=100):
-    print(f'Generating graph_data for {dataset_name}')
-    path = './data'
-    base_path = os.path.join(path, f'fewshot_{dataset_name.lower()}_graph')
-    create_folders(base_path, dataset_name, num_shots, num_samples)
+def save_sample(data, path):
+    import torch
+    path = Path(path)
+    path.mkdir(parents=True, exist_ok=False)
+    for key, value in data.items():
+        torch.save(value, path / f'{key}.pt')
 
-    for shot in range(1, num_shots + 1):
-        samples = generate_fewshot_samples_graph(dataset_name, shot, num_samples, path)
-        for i, sample in enumerate(samples):
-            sample_path = os.path.join(base_path, f'{shot}-shot_{dataset_name.lower()}', str(i))
-            #batch = torch.arange(len(sample['idx']))
-            #sample['batch'] = batch
-            save_sample(sample, sample_path)
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--datasets', nargs='+', default=['Cora'])
+    parser.add_argument('--task', choices=['node', 'graph', 'both'], default='node')
+    parser.add_argument('--shots', type=int, default=1, help='Generate 1 through this many shots.')
+    parser.add_argument('--episodes', type=int, default=100)
+    parser.add_argument('--test-count', type=int, default=100)
+    parser.add_argument('--seed', type=int, default=39)
+    parser.add_argument('--data-dir', type=resolve_path, default=DATA_DIR)
+    args = parser.parse_args(argv)
+    if min(args.shots, args.episodes, args.test_count) < 1:
+        parser.error('shots, episodes and test-count must be positive')
+    tasks = ['node', 'graph'] if args.task == 'both' else [args.task]
+    # Refuse overwrite before downloading data or creating any episode directories.
+    for name in args.datasets:
+        for shot in range(1, args.shots + 1):
+            for episode in range(args.episodes):
+                for task in tasks:
+                    path = fewshot_dir(args.data_dir, name, shot, episode, task)
+                    if path.exists():
+                        parser.error(f'Already exists: {path}. Use a new --data-dir to preserve this split.')
+    from utils.dataset import load_dataset
+    from utils import process
+    for name in args.datasets:
+        dataset = load_dataset(name, args.data_dir)
+        if len(dataset) != 1:
+            raise ValueError('This entry point supports single-graph node / ego-subgraph datasets.')
+        data = dataset[0]
+        if 'graph' in tasks:
+            _, adj = process.process_tu(data, data.x.shape[1])
+        for shot in range(1, args.shots + 1):
+            samples = generate_fewshot_samples(data.y.cpu(), shot, args.episodes, args.test_count, args.seed)
+            for episode, sample in enumerate(samples):
+                for task in tasks:
+                    result = dict(sample)
+                    if task == 'graph':
+                        result.update(process.build_subgraph(adj, sample['centers'], sparse=True))
+                    save_sample(result, fewshot_dir(args.data_dir, name, shot, episode, task))
+        print(f'{name}: saved {tasks}, shots=1..{args.shots}, episodes={args.episodes}, seed={args.seed}, root={args.data_dir}')
+
 
 if __name__ == '__main__':
-    datasets =   ['Cora', 'Citeseer', 'Pubmed', 'Photo', 'Computers', 'FacebookPagePage', 'LastFMAsia']
-    for dataset_name in datasets:
-        save_fewshot_data(dataset_name)
-        save_fewshot_graph_data(dataset_name)
+    main()

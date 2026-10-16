@@ -20,48 +20,29 @@ def aug_random_mask(input_feature, drop_percent=0.2):
 
 
 def aug_random_edge(input_adj, drop_percent=0.2):
-
-    percent = drop_percent / 2
-    row_idx, col_idx = input_adj.nonzero()
-
-    index_list = []
-    for i in range(len(row_idx)):
-        index_list.append((row_idx[i], col_idx[i]))
-
-    processed_edges = set()
-    single_index_list = []
-    for i in index_list:
-        if (i[1], i[0]) not in processed_edges:
-            single_index_list.append(i)
-            processed_edges.add(i)
-            processed_edges.add((i[1], i[0]))
-    
-    edge_num = int(len(row_idx) / 2)    
-    add_drop_num = int(edge_num * percent / 2) 
-    aug_adj = copy.deepcopy(input_adj.todense().tolist())
-
-    edge_idx = [i for i in range(edge_num)]
-    drop_idx = random.sample(edge_idx, add_drop_num)
-
-    
-    for i in drop_idx:
-        aug_adj[single_index_list[i][0]][single_index_list[i][1]] = 0
-        aug_adj[single_index_list[i][1]][single_index_list[i][0]] = 0
-    
-
-    #above finish drop edges
-    node_num = input_adj.shape[0]
-    l = [(i, j) for i in range(node_num) for j in range(i)]
-    add_list = random.sample(l, add_drop_num)
-
-    for i in add_list:
-        
-        aug_adj[i[0]][i[1]] = 1
-        aug_adj[i[1]][i[0]] = 1
-    
-    aug_adj = np.matrix(aug_adj)
-    aug_adj = sp.csr_matrix(aug_adj)
-    return aug_adj
+    """Original undirected drop/add distribution, without quadratic Python lists."""
+    from math import isqrt
+    if not 0 <= drop_percent <= 1:
+        raise ValueError('drop_percent must be between 0 and 1.')
+    if input_adj.shape[0] != input_adj.shape[1] or (input_adj != input_adj.T).nnz:
+        raise ValueError('Edge augmentation expects a symmetric adjacency matrix.')
+    rows, cols = sp.triu(input_adj, k=1).nonzero()
+    edges = list(zip(rows, cols))
+    # Keep upstream's count (drop_percent / 4), including its add-to-existing behavior.
+    count = int(len(edges) * drop_percent / 4)
+    result = input_adj.tolil(copy=True)
+    for i in random.sample(range(len(edges)), count):
+        a, b = edges[i]
+        result[a, b] = result[b, a] = 0
+    nodes = input_adj.shape[0]
+    # Rank r identifies one pair in [(i,j) for i in range(nodes) for j in range(i)].
+    for r in random.sample(range(nodes * (nodes - 1) // 2), count):
+        a = (1 + isqrt(1 + 8 * r)) // 2
+        b = r - a * (a - 1) // 2
+        result[a, b] = result[b, a] = 1
+    result = result.tocsr()
+    result.eliminate_zeros()
+    return result
 
 
 def aug_drop_node(input_fea, input_adj, drop_percent=0.2):

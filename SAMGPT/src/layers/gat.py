@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn import GATConv 
 from torch_geometric.utils import dense_to_sparse
-from torch_sparse import spmm
+
 class GAT(nn.Module):
     def __init__(self, in_ft, out_ft, nheads=2, concat=True, dropout=0.6, alpha=0.2, bias=True):
         super(GAT, self).__init__()

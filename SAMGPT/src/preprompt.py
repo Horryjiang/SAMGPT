@@ -1,11 +1,9 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from models import DGI, GraphCL, Lp, GcnLayers, MLP, GatLayers
+from models import DGI, GraphCL, Lp, GcnLayers, MLP
 from layers import AvgReadout 
-import tqdm
 import numpy as np
-from sklearn.decomposition import PCA
 from layers.prompt import *
 import copy
 
@@ -28,8 +26,9 @@ class PrePrompt(nn.Module):
 
         self.gcn = GcnLayers(n_in, n_h, num_layers_num, dropout)
         if backbone == 'gat':
+            from models.gatlayers import GatLayers
             self.gcn = GatLayers(n_in, n_h, num_layers_num, dropout)
-            str_prompt = [textprompt(n_h * self.gcn.heads, type_) for _ in range(num_layers_num)]
+            str_prompt = [textprompt(n_h, type_) for _ in range(num_layers_num)]
             #str_prompt.append(textprompt(n_h, type_))
             self.structure_prompt_layers =  nn.ModuleList([
                 nn.ModuleList(copy.deepcopy(str_prompt))
@@ -103,7 +102,7 @@ class PrePrompt(nn.Module):
     def forward(self, seq_list, adj_list, sparse, msk, 
         samp_bias1, samp_bias2, lbl, samples = None):        
         total_loss = torch.tensor(0.0, dtype=torch.float32).to(seq_list[0].device)
-        if samples == None:
+        if samples is None:
             logits = list(self.compute_prelogits_GRAPHCL(
                 self.feature_prompt_layers, 
                 self.structure_prompt_layers,
@@ -121,13 +120,13 @@ class PrePrompt(nn.Module):
                 adj_list, 
                 sparse))
             if type(samples) == list:
-                samples = [torch.tensor(sample, dtype=torch.int64).to(seq_list[0].device)
+                samples = [torch.as_tensor(sample, dtype=torch.int64).to(seq_list[0].device)
                     for sample in samples] 
                 for i in range(len(logits)):    
                     loss = compareloss(logits[i], samples[i], temperature=1)
                     total_loss += loss
             else:
-                samples = torch.tensor(samples, dtype=torch.int64).to(seq_list[0].device)
+                samples = torch.as_tensor(samples, dtype=torch.int64).to(seq_list[0].device)
                 logits = torch.cat(logits, dim=0)
                 total_loss = compareloss(logits, samples, temperature=1)
 
@@ -136,6 +135,9 @@ class PrePrompt(nn.Module):
 
 
 def pca_compression(seq,k):
+    from sklearn.decomposition import PCA
+    if not 1 <= k <= min(seq.shape):
+        raise ValueError(f'PCA dimension {k} must be between 1 and min(shape)={min(seq.shape)}.')
     pca = PCA(n_components=k)
     seq = pca.fit_transform(seq)
     
@@ -186,7 +188,7 @@ def prompt_pretrain_sample(adj,n):
     whole=np.array(range(nodenum))
 
     for i in range(nodenum):
-        nonzero_index_i_row=indices[indptr[i]:indptr[i+1]]
+        nonzero_index_i_row=indices[indptr[i]:indptr[i+1]].copy()
         zero_index_i_row=np.setdiff1d(whole,nonzero_index_i_row)
         np.random.shuffle(nonzero_index_i_row)
         np.random.shuffle(zero_index_i_row)
@@ -194,5 +196,7 @@ def prompt_pretrain_sample(adj,n):
             res[i][0] = i
         else:
             res[i][0]=nonzero_index_i_row[0]
+        if len(zero_index_i_row) < n:
+            raise ValueError(f'Node {i} has only {len(zero_index_i_row)} negative candidates, requested {n}.')
         res[i][1:1+n]=zero_index_i_row[0:n]
     return torch.tensor(res.astype(int) )

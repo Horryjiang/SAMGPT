@@ -8,7 +8,6 @@ from functools import partial
 # from dgl.nn.pytorch.conv import RelGraphConv
 # from basemodel import GraphAdjModel
 import numpy as np
-import tqdm
 
 class Lp(nn.Module):
     def __init__(self, n_in, n_h):

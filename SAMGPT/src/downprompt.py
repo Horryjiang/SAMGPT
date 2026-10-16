@@ -3,7 +3,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 from models import MLP
 from layers import GCN, AvgReadout
-import torch_scatter
+def scatter_mean(src, index):
+    # Native PyTorch equivalent of scatter(..., dim=0, reduce='mean').
+    size = int(index.max().item()) + 1
+    sums = src.new_zeros((size, src.shape[1])).index_add(0, index, src)
+    counts = torch.bincount(index, minlength=size).to(src.dtype).clamp_min(1)
+    return sums / counts[:, None]
+
 from layers.prompt import *
 class downstreamprompt(nn.Module):
     def __init__(self, feature_dim, hidden_dim, num_layers_num, fea_pretext_weights, str_pretext_weights, 
@@ -15,7 +21,7 @@ class downstreamprompt(nn.Module):
             for i in range(num_layers_num)
         ])
         
-        self.open_prompt_fea = textprompt(feature_dim)
+        self.open_prompt_fea = textprompt(feature_dim, type_)
         self.open_prompt_str = nn.ModuleList()
         for weight in str_pretext_weights[0]:
             in_features = weight.size(1)
@@ -41,7 +47,7 @@ class downstreamprompt(nn.Module):
         else:
             seq_fea = self.composedprompt_fea(seq) + self.beta * self.open_prompt_fea(seq)
         if self.ablation_choice[-2:] == 'fo':
-            seq_fea == open_seq_fea
+            seq_fea = open_seq_fea
         elif self.ablation_choice[-2:] == 'fc':
             seq_fea = composed_seq_fea
         embed_fea = gcn(seq_fea, adj, sparse, None)
@@ -79,21 +85,20 @@ class downprompt(nn.Module):
         self.nb_classes = nb_classes
         self.leakyrelu = nn.ELU()
         self.one = torch.ones(1, ft_in)
-        self.ave = torch.FloatTensor(nb_classes, ft_in)
+        self.register_buffer('ave', torch.zeros(nb_classes, ft_in))
 
 
-    def forward(self,features,adj,sparse,gcn,idx,labels=None,train=0):
+    def forward(self,features,adj,sparse,gcn,idx,labels=None,train=0,return_logits=False):
 
         embeds = self.downstreamPrompt(features, gcn, adj, sparse).squeeze(0)   
         rawret = embeds[idx]
         num =  rawret.shape[0]
         if train == 1:
             self.ave = averageemb(labels=labels, rawret=rawret)
-        ret = torch.FloatTensor(num,self.nb_classes)
-        rawret = torch.cat((rawret,self.ave),dim=0)
-        rawret = torch.cosine_similarity(rawret.unsqueeze(1), rawret.unsqueeze(0), dim=-1)
-        ret = rawret[:num,num:]
-        ret = F.softmax(ret, dim=1)
+        # Compare N samples with C prototypes, without an (N+C)^2 matrix.
+        ret = torch.cosine_similarity(rawret[:, None, :], self.ave[None, :, :], dim=-1)
+        if not return_logits:
+            ret = F.softmax(ret, dim=1)
         return ret
 
     def weights_init(self, m):
@@ -117,21 +122,20 @@ class downprompt_graph(nn.Module):
         self.nb_classes = nb_classes
         self.leakyrelu = nn.ELU()
         self.one = torch.ones(1, ft_in)
-        self.ave = torch.FloatTensor(nb_classes, ft_in)
+        self.register_buffer('ave', torch.zeros(nb_classes, ft_in))
 
 
-    def forward(self,features,adj,sparse,gcn,idx,batch,labels=None,train=0):
+    def forward(self,features,adj,sparse,gcn,idx,batch,labels=None,train=0,return_logits=False):
 
         embeds = self.downstreamPrompt(features, gcn, adj, sparse).squeeze(0)   
-        rawret = torch_scatter.scatter(src=embeds[idx],index=batch,dim=0,reduce='mean')
+        rawret = scatter_mean(embeds[idx], batch)
         num =  rawret.shape[0]
         if train == 1:
             self.ave = averageemb(labels=labels, rawret=rawret)
-        ret = torch.FloatTensor(num,self.nb_classes)
-        rawret = torch.cat((rawret,self.ave),dim=0)
-        rawret = torch.cosine_similarity(rawret.unsqueeze(1), rawret.unsqueeze(0), dim=-1)
-        ret = rawret[:num,num:]
-        ret = F.softmax(ret, dim=1)
+        # Compare N samples with C prototypes, without an (N+C)^2 matrix.
+        ret = torch.cosine_similarity(rawret[:, None, :], self.ave[None, :, :], dim=-1)
+        if not return_logits:
+            ret = F.softmax(ret, dim=1)
 
         return ret
 
@@ -142,5 +146,5 @@ class downprompt_graph(nn.Module):
                 m.bias.data.fill_(0.0)
 
 def averageemb(labels, rawret):
-    retlabel = torch_scatter.scatter(src=rawret,index=labels,dim=0,reduce='mean')
+    retlabel = scatter_mean(rawret, labels)
     return retlabel

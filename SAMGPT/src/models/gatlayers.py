@@ -1,12 +1,14 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from layers import GAT
+from layers.gat import GAT
 from layers.prompt import *
 class GatLayers(torch.nn.Module):
     def __init__(self, n_in, n_h, num_layers_num, dropout=0.6, heads=2):
         super(GatLayers, self).__init__()
 
+        if n_h % heads:
+            raise ValueError('GAT hid_units must be divisible by heads.')
         self.act = torch.nn.PReLU() 
         self.num_layers_num = num_layers_num
         self.g_net, self.bns = self.create_net(n_in, int(n_h/heads), num_layers_num, heads)
@@ -55,5 +57,4 @@ class GatLayers(torch.nn.Module):
                 
             xs.append(graph_output)
 
-        return graph_output.unsqueeze(dim=0) 
-
+        return graph_output.unsqueeze(dim=0)

@@ -1,11 +1,10 @@
 import torch
-import matplotlib.pyplot as plt
 from torch_geometric.datasets import WebKB, Planetoid, Amazon, Coauthor, WikipediaNetwork, Reddit, \
     Flickr, PPI, Yelp, Twitch, Actor, KarateClub, FacebookPagePage, LastFMAsia
  #BitcoinOTC 
 
 from torch_geometric.utils import degree
-from ogb.nodeproppred import PygNodePropPredDataset
+from runtime import DATA_DIR
 #from ogb.lsc import MAG240MDataset
 from torch_geometric.utils import to_networkx, degree
 import networkx as nx
@@ -30,7 +29,8 @@ LastFMAsia_datasets = ['LastFMAsia']
 #BitcoinOTC_datasets = ['BitcoinOTC']
 #MAG240MDatasets = ['MAG240MDataset']
 
-def load_dataset(name, path='./data'):
+def load_dataset(name, path=None):
+    path = str(DATA_DIR if path is None else path)
     if name in Planetoid_datasets:
         dataset = Planetoid(root=path, name=name)
     elif name in Amazon_datasets:
@@ -44,6 +44,7 @@ def load_dataset(name, path='./data'):
     elif name in Reddit_datasets:
         dataset = Reddit(root=f'{path}/Reddit')
     elif name in OGB_datasets:
+        from ogb.nodeproppred import PygNodePropPredDataset
         dataset = PygNodePropPredDataset(root=path, name=name)
     elif name in Flickr_datasets:
         dataset = Flickr(root=f'{path}/Flickr')
@@ -71,6 +72,7 @@ def load_dataset(name, path='./data'):
     return dataset
 
 def analyze_dataset(name, graph = False):
+    import matplotlib.pyplot as plt
     data_ = load_dataset(name)
     #print(len(data_))
     data = data_[0]
@@ -110,6 +112,7 @@ def analyze_dataset(name, graph = False):
     
 
 def analyze_dataset_multi(name, graph = False):
+    import matplotlib.pyplot as plt
     data_ = load_dataset(name)
     #print(len(data_))
     for i, data in enumerate(data_):

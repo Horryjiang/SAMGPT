@@ -8,37 +8,20 @@ from scipy.sparse.linalg import eigsh
 import sys
 import torch
 import torch.nn as nn
-import pandas as pd
 
 import numpy as np
-import matplotlib.pyplot as plt
-from sklearn import manifold
 
 
 def find_2hop_neighbors_sp(adj, node):
-    # print(adj.getrow(node))
-    # print(adj.getrow(node).todense().A)
-    nodeadj = adj.getrow(node).todense().A[0]
-    neighbors = []
-    # print(type(adj))
-    for i in range(len(nodeadj)):
-        if len(neighbors) >= 4:
-            break
-        # print('i',i)
-        # print('node',node)
-        # print('adj[node][i]',adj[node,i])
-        if nodeadj[i] != 0 and node != i:
-            neighbors.append(i)
+    # Same ascending order and 4/2 caps as the original sparse implementation.
+    node = int(node)
+    row = adj.getrow(node)
+    neighbors = sorted(int(i) for i, v in zip(row.indices, row.data) if v != 0 and i != node)[:4]
     neighbors_2hop = []
-    for i in neighbors:
-        cnt = 0
-        nodeadj = adj.getrow(i).todense().A[0]
-        for j in range(len(nodeadj)):
-            if cnt >= 2:
-                break
-            if nodeadj[j] != 0 and j != i:
-                neighbors_2hop.append(j)
-                cnt += 1
+    for neighbor in neighbors:
+        row = adj.getrow(neighbor)
+        neighbors_2hop.extend(sorted(int(i) for i, v in zip(row.indices, row.data)
+                                    if v != 0 and i != neighbor)[:2])
     return neighbors, neighbors_2hop
 
 
@@ -95,6 +78,8 @@ def build_subgraph(adj, idx_train, sparse = True):
     }
 
 def plotlabels(feature, Trure_labels, name):
+    import pandas as pd
+    import matplotlib.pyplot as plt
  # maker = ['o', 's', '^', 's', 'p', '*', '<', '>', 'D', 'd', 'h', 'H']
 
     S_lowDWeights = visual(feature)
@@ -117,6 +102,7 @@ def plotlabels(feature, Trure_labels, name):
     plt.clf()
 
 def visual(feat):
+    from sklearn import manifold
     ts = manifold.TSNE(n_components=2, init='pca', random_state=0)
     x_ts = ts.fit_transform(feat)
     print(x_ts.shape) # [num, 2]
@@ -384,8 +370,4 @@ def sparse_mx_to_torch_sparse_tensor(sparse_mx):
         np.vstack((sparse_mx.row, sparse_mx.col)).astype(np.int64))
     values = torch.from_numpy(sparse_mx.data)
     shape = torch.Size(sparse_mx.shape)
-    return torch.sparse.FloatTensor(indices, values, shape)
-
-
-
-
+    return torch.sparse_coo_tensor(indices, values, shape).coalesce()

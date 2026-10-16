@@ -58,7 +58,7 @@ class composedtoken(nn.Module):
     def __init__(self, texttokens, type_='mul'):
         super(composedtoken, self).__init__()
         # print(texttoken1.shape)
-        self.texttoken = torch.cat(texttokens,dim=0)
+        self.register_buffer('texttoken', torch.cat(texttokens, dim=0).detach().clone())
         # print(self.texttoken.shape)
         self.prompt = weighted_prompt( len(texttokens) )
         self.type = type_
@@ -79,9 +79,9 @@ class composedtoken(nn.Module):
 class composedNet(nn.Module):
     def __init__(self, length):
         super(composedNet, self).__init__()
-        #self.texttoken = torch.cat(texttokens,dim=0)
+        #self.register_buffer('texttoken', torch.cat(texttokens, dim=0).detach().clone())
         self.length = length
-        self.prompt = weighted_prompt( length ).cuda()
+        self.prompt = weighted_prompt( length )
 
     def forward(self, paras):
         # print(seq.shape)
@@ -94,4 +94,3 @@ class composedNet(nn.Module):
             target[key] = self.prompt(para_key)
 
         return target
- 
